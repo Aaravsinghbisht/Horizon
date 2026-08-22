@@ -1,0 +1,11 @@
+services:
+  chrome:
+    image: zenika/alpine-chrome:latest
+    container_name: compositer-chrome
+    network_mode: bridge
+    command:
+      - --no-sandbox
+      - --remote-debugging-address=0.0.0.0
+      - --remote-debugging-port=9222
+    restart: unless-stopped
+    shm_size: "256mb"

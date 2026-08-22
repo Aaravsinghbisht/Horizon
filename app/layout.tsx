@@ -20,7 +20,7 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "compister",
+  title: "Compositer",
   description: "A Next.js starter for eve agents with AI Elements.",
 };
 
