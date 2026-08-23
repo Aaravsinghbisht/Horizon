@@ -20,8 +20,12 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Compositer",
-  description: "A Next.js starter for eve agents with AI Elements.",
+  title: {
+    default: "Compositer",
+    template: "%s",
+  },
+  description:
+    "A local AI browser agent with a built-in security layer. Browse, buy, and pay online while 10 local security checks guard every step.",
 };
 
 export default function RootLayout({ children }: { readonly children: ReactNode }) {

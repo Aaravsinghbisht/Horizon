@@ -1,6 +1,6 @@
 import { cleanTitle, getPreviewPage, resolveViewport } from "@/lib/browser-cdp-shared";
 
-export type BrowserInteractAction = "click" | "type" | "scroll";
+export type BrowserInteractAction = "click" | "type" | "scroll" | "keypress";
 
 export type BrowserInteractRequest = {
   action: BrowserInteractAction;
@@ -8,6 +8,7 @@ export type BrowserInteractRequest = {
   x?: number;
   y?: number;
   text?: string;
+  key?: string;
   deltaY?: number;
   viewportWidth?: number;
   viewportHeight?: number;
@@ -64,6 +65,15 @@ export async function performBrowserInteract(
           await page.mouse.move(request.x, request.y);
         }
         await page.mouse.wheel({ deltaY: request.deltaY ?? 120 });
+        break;
+      }
+      case "keypress": {
+        if (!request.key) {
+          throw new Error("keypress requires key");
+        }
+        await page.keyboard.press(
+          request.key as Parameters<typeof page.keyboard.press>[0],
+        );
         break;
       }
       default:

@@ -82,14 +82,35 @@ export function isComposerLocked(options: {
   return options.journeyPhase === "running";
 }
 
-/** Free browsing after a task ends; interactive only during HITL while a task runs. */
+/** Free browsing after a task ends; interactive during HITL, takeover, or captcha challenge. */
+export function isBrowserInteractive(options: {
+  userTakeover: boolean;
+  journeyPhase: JourneyPhase;
+  pendingHitl: boolean;
+  isBusy: boolean;
+  challengeDetected?: boolean;
+}): boolean {
+  if (options.userTakeover || options.journeyPhase === "done") {
+    return true;
+  }
+
+  if (options.challengeDetected) {
+    return true;
+  }
+
+  return options.journeyPhase === "running" && !options.isBusy && options.pendingHitl;
+}
+
+/** @deprecated Use isBrowserInteractive */
 export function isBrowserUserControl(options: {
   journeyPhase: JourneyPhase;
   pendingHitl: boolean;
   isBusy: boolean;
 }): boolean {
-  if (options.journeyPhase === "done") {
-    return true;
-  }
-  return options.journeyPhase === "running" && !options.isBusy && options.pendingHitl;
+  return isBrowserInteractive({
+    userTakeover: false,
+    journeyPhase: options.journeyPhase,
+    pendingHitl: options.pendingHitl,
+    isBusy: options.isBusy,
+  });
 }

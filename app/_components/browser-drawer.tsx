@@ -1,8 +1,16 @@
 "use client";
 
-import { ChevronRightIcon, GlobeIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  GlobeIcon,
+  HandIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { looksLikeCaptchaOrChallenge } from "@/lib/browser-challenge";
 import { cn } from "@/lib/utils";
 
 type ViewportSize = { width: number; height: number };
@@ -16,10 +24,20 @@ type PreviewPayload = {
 };
 
 const LIVE_INTERVAL_MS = 500;
-const INTERACTIVE_INTERVAL_MS = 350;
+const INTERACTIVE_INTERVAL_MS = 600;
 const IDLE_INTERVAL_MS = 15000;
 const INTERACT_REFRESH_MS = 200;
 const TYPE_BATCH_MS = 40;
+const RESIZE_DEBOUNCE_MS = 150;
+
+const KEYPRESS_MAP: Record<string, string> = {
+  ArrowDown: "ArrowDown",
+  ArrowLeft: "ArrowLeft",
+  ArrowRight: "ArrowRight",
+  ArrowUp: "ArrowUp",
+  Escape: "Escape",
+  Tab: "Tab",
+};
 
 function viewportCoordsFromEvent(
   event: { clientX: number; clientY: number },
@@ -36,29 +54,40 @@ function viewportCoordsFromEvent(
 
 export function BrowserDrawer({
   activityLabel,
+  canTakeControl,
   className,
   focusUrl,
   isInteractive,
   isLive,
   journeyComplete,
-  open,
   onOpenChange,
+  onReleaseControl,
+  onTakeControl,
+  open,
   previewEnabled,
+  userTakeover,
 }: {
   readonly activityLabel?: string;
+  readonly canTakeControl?: boolean;
   readonly className?: string;
   readonly focusUrl?: string;
   readonly isInteractive: boolean;
   readonly isLive: boolean;
   readonly journeyComplete: boolean;
-  readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly onReleaseControl?: () => void;
+  readonly onTakeControl?: () => void;
+  readonly open: boolean;
   readonly previewEnabled: boolean;
+  readonly userTakeover?: boolean;
 }) {
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | undefined>();
+  const [imageA, setImageA] = useState<string | null>(null);
+  const [imageB, setImageB] = useState<string | null>(null);
+  const [activeBuffer, setActiveBuffer] = useState<0 | 1>(0);
   const inFlightRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
@@ -68,6 +97,20 @@ export function BrowserDrawer({
   const typeBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollPendingRef = useRef(false);
   const lastImageRef = useRef<string | null>(null);
+  const hasLoadedOnceRef = useRef(false);
+  const wasInteractiveRef = useRef(false);
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeBufferRef = useRef<0 | 1>(0);
+
+  const challengeDetected = useMemo(
+    () =>
+      preview
+        ? looksLikeCaptchaOrChallenge(preview.title, preview.url)
+        : false,
+    [preview],
+  );
+
+  const fullyInteractive = isInteractive || challengeDetected;
 
   useEffect(() => {
     const node = previewAreaRef.current;
@@ -75,38 +118,71 @@ export function BrowserDrawer({
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect && rect.width > 0 && rect.height > 0) {
+    const applySize = (width: number, height: number) => {
+      if (width > 0 && height > 0) {
         setContainerSize({
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
+          width: Math.round(width),
+          height: Math.round(height),
         });
       }
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) {
+        return;
+      }
+
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current);
+      }
+
+      resizeTimerRef.current = setTimeout(() => {
+        resizeTimerRef.current = null;
+        applySize(rect.width, rect.height);
+      }, RESIZE_DEBOUNCE_MS);
     });
 
     observer.observe(node);
-    setContainerSize({
-      width: Math.round(node.clientWidth),
-      height: Math.round(node.clientHeight),
-    });
+    applySize(node.clientWidth, node.clientHeight);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current);
+      }
+    };
   }, [open]);
+
+  const applyPreviewImage = useCallback((image: string) => {
+    if (image === lastImageRef.current) {
+      return;
+    }
+
+    lastImageRef.current = image;
+    if (activeBufferRef.current === 0) {
+      setImageB(image);
+      activeBufferRef.current = 1;
+      setActiveBuffer(1);
+    } else {
+      setImageA(image);
+      activeBufferRef.current = 0;
+      setActiveBuffer(0);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     if (inFlightRef.current) {
       return;
     }
 
-    if (abortRef.current) {
-      abortRef.current.abort();
-    }
-
     const controller = new AbortController();
     abortRef.current = controller;
     inFlightRef.current = true;
-    setLoading(true);
+
+    if (!hasLoadedOnceRef.current) {
+      setInitialLoading(true);
+    }
 
     try {
       const params = new URLSearchParams();
@@ -119,7 +195,7 @@ export function BrowserDrawer({
       if (containerSize?.height) {
         params.set("viewportHeight", String(containerSize.height));
       }
-      params.set("quality", isInteractive ? "65" : "50");
+      params.set("quality", fullyInteractive ? "65" : "50");
 
       const query = params.size > 0 ? `?${params.toString()}` : "";
       const response = await fetch(`/api/browser/preview${query}`, {
@@ -139,12 +215,19 @@ export function BrowserDrawer({
       }
 
       setError(null);
-      if (body.preview.image !== lastImageRef.current) {
-        lastImageRef.current = body.preview.image;
-        setPreview(body.preview);
-      } else if (!preview) {
-        setPreview(body.preview);
-      }
+      hasLoadedOnceRef.current = true;
+      applyPreviewImage(body.preview.image);
+      setPreview((current) => {
+        if (
+          current &&
+          current.image === body.preview!.image &&
+          current.url === body.preview!.url &&
+          current.title === body.preview!.title
+        ) {
+          return current;
+        }
+        return body.preview!;
+      });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") {
         return;
@@ -155,10 +238,16 @@ export function BrowserDrawer({
       inFlightRef.current = false;
       if (abortRef.current === controller) {
         abortRef.current = null;
-        setLoading(false);
+        setInitialLoading(false);
       }
     }
-  }, [containerSize?.height, containerSize?.width, focusUrl, isInteractive, preview]);
+  }, [
+    applyPreviewImage,
+    containerSize?.height,
+    containerSize?.width,
+    focusUrl,
+    fullyInteractive,
+  ]);
 
   const scheduleInteractRefresh = useCallback(() => {
     if (interactRefreshTimerRef.current) {
@@ -196,10 +285,11 @@ export function BrowserDrawer({
 
   const sendInteract = useCallback(
     async (payload: {
-      action: "click" | "type" | "scroll";
+      action: "click" | "type" | "scroll" | "keypress";
       x?: number;
       y?: number;
       text?: string;
+      key?: string;
       deltaY?: number;
     }) => {
       const response = await fetch("/api/browser/interact", {
@@ -242,7 +332,7 @@ export function BrowserDrawer({
 
   const handlePreviewClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!isInteractive || !preview?.viewport || !interactRef.current) {
+      if (!fullyInteractive || !preview?.viewport || !interactRef.current) {
         return;
       }
 
@@ -250,12 +340,12 @@ export function BrowserDrawer({
       const { x, y } = viewportCoordsFromEvent(event, rect, preview.viewport);
       void sendInteract({ action: "click", x, y });
     },
-    [isInteractive, preview?.viewport, sendInteract],
+    [fullyInteractive, preview?.viewport, sendInteract],
   );
 
   const handlePreviewWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
-      if (!isInteractive || !preview?.viewport || scrollPendingRef.current) {
+      if (!fullyInteractive || !preview?.viewport || scrollPendingRef.current) {
         return;
       }
 
@@ -276,16 +366,31 @@ export function BrowserDrawer({
         scrollPendingRef.current = false;
       });
     },
-    [isInteractive, preview?.viewport, sendInteract],
+    [fullyInteractive, preview?.viewport, sendInteract],
   );
 
   const handlePreviewKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!isInteractive) {
+      if (!fullyInteractive) {
         return;
       }
 
-      if (event.key === "Tab" || event.key === "Escape") {
+      if ((event.ctrlKey || event.metaKey) && event.key === "v") {
+        event.preventDefault();
+        void flushTypeBatch();
+        void navigator.clipboard.readText().then((text) => {
+          if (text.length > 0) {
+            queueType(text);
+          }
+        });
+        return;
+      }
+
+      const keypress = KEYPRESS_MAP[event.key];
+      if (keypress) {
+        event.preventDefault();
+        void flushTypeBatch();
+        void sendInteract({ action: "keypress", key: keypress });
         return;
       }
 
@@ -306,14 +411,17 @@ export function BrowserDrawer({
         queueType(event.key);
       }
     },
-    [isInteractive, queueType],
+    [fullyInteractive, flushTypeBatch, queueType, sendInteract],
   );
 
   useEffect(() => {
     if (!previewEnabled) {
       setPreview(null);
       setError(null);
+      setImageA(null);
+      setImageB(null);
       lastImageRef.current = null;
+      hasLoadedOnceRef.current = false;
     }
   }, [previewEnabled]);
 
@@ -330,7 +438,7 @@ export function BrowserDrawer({
     };
 
     tick();
-    const intervalMs = isInteractive
+    const intervalMs = fullyInteractive
       ? INTERACTIVE_INTERVAL_MS
       : isLive
         ? LIVE_INTERVAL_MS
@@ -352,18 +460,24 @@ export function BrowserDrawer({
         clearTimeout(typeBatchTimerRef.current);
       }
     };
-  }, [isInteractive, isLive, open, previewEnabled, refresh]);
+  }, [fullyInteractive, isLive, open, previewEnabled, refresh]);
 
   useEffect(() => {
-    if (isInteractive && interactRef.current) {
+    if (fullyInteractive && !wasInteractiveRef.current && interactRef.current) {
       interactRef.current.focus();
     }
-  }, [isInteractive, preview?.updatedAt]);
+    wasInteractiveRef.current = fullyInteractive;
+  }, [fullyInteractive]);
 
-  const imageSrc = useMemo(
-    () => (preview ? `data:image/jpeg;base64,${preview.image}` : undefined),
-    [preview],
-  );
+  const frontImageSrc = useMemo(() => {
+    const image = activeBuffer === 0 ? imageA : imageB;
+    return image ? `data:image/jpeg;base64,${image}` : undefined;
+  }, [activeBuffer, imageA, imageB]);
+
+  const backImageSrc = useMemo(() => {
+    const image = activeBuffer === 0 ? imageB : imageA;
+    return image ? `data:image/jpeg;base64,${image}` : undefined;
+  }, [activeBuffer, imageA, imageB]);
 
   if (!open) {
     return (
@@ -398,17 +512,28 @@ export function BrowserDrawer({
               : focusUrl ?? "Waiting for navigation…"}
           </p>
         </div>
+        {userTakeover ? (
+          <Button onClick={onReleaseControl} size="sm" type="button" variant="secondary">
+            <SparklesIcon className="size-3.5" />
+            Return to agent
+          </Button>
+        ) : canTakeControl ? (
+          <Button onClick={onTakeControl} size="sm" type="button" variant="outline">
+            <HandIcon className="size-3.5" />
+            Take control
+          </Button>
+        ) : null}
         <span
           className={cn(
             "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-            isInteractive
+            userTakeover || fullyInteractive
               ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
               : isLive
                 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                 : "bg-muted text-muted-foreground",
           )}
         >
-          {isInteractive ? "Your turn" : isLive ? "Live" : "Idle"}
+          {userTakeover ? "You control" : fullyInteractive ? "Your turn" : isLive ? "Live" : "Idle"}
         </span>
         <Button
           aria-label="Close browser preview"
@@ -421,58 +546,71 @@ export function BrowserDrawer({
         </Button>
       </div>
 
-      <div
-        className="relative min-h-0 flex-1 overflow-hidden bg-[#0a0a0a]"
-        ref={previewAreaRef}
-      >
-        {previewEnabled && preview && imageSrc ? (
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[#0a0a0a]" ref={previewAreaRef}>
+        {previewEnabled && preview && frontImageSrc ? (
           <div
             aria-label="Interactive browser preview"
             className={cn(
               "relative flex size-full items-center justify-center outline-none",
-              isInteractive && "cursor-crosshair",
+              fullyInteractive && "cursor-crosshair",
             )}
             onClick={handlePreviewClick}
             onKeyDown={handlePreviewKeyDown}
             onWheel={handlePreviewWheel}
             ref={interactRef}
-            role={isInteractive ? "button" : undefined}
-            tabIndex={isInteractive ? 0 : -1}
+            role={fullyInteractive ? "button" : undefined}
+            tabIndex={fullyInteractive ? 0 : -1}
           >
+            {backImageSrc ? (
+              <img
+                alt=""
+                className="absolute max-h-full max-w-full object-contain opacity-0"
+                decoding="async"
+                draggable={false}
+                src={backImageSrc}
+              />
+            ) : null}
             <img
               alt={preview.title || "Browser preview"}
-              className="max-h-full max-w-full object-contain"
+              className="relative max-h-full max-w-full object-contain"
               decoding="async"
               draggable={false}
-              src={imageSrc}
+              src={frontImageSrc}
             />
-              {isInteractive ? (
-                <div className="pointer-events-none absolute inset-x-0 top-0 border-b border-amber-400/40 bg-amber-500/90 px-3 py-1.5 text-amber-950 text-xs font-medium">
-                  {journeyComplete
-                    ? "Browse freely — click and type in the browser, or send a new task in chat"
-                    : "Your turn — click and type in the browser, then pick an option in chat"}
-                </div>
-              ) : null}
+            {fullyInteractive ? (
+              <div className="pointer-events-none absolute inset-x-0 top-0 border-b border-amber-400/40 bg-amber-500/90 px-3 py-1.5 text-amber-950 text-xs font-medium">
+                {userTakeover
+                  ? "You have control — click, type, scroll freely. Return to agent when done."
+                  : challengeDetected
+                    ? "Security challenge detected — complete it in the browser or dialog"
+                    : journeyComplete
+                      ? "Browse freely — click and type in the browser, or send a new task in chat"
+                      : "Your turn — click and type in the browser, then answer in chat or the dialog"}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="flex h-full min-h-48 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground text-sm">
             <GlobeIcon className="size-8 opacity-40" />
             <p>
               {previewEnabled
-                ? error ?? (loading ? "Connecting to Chrome…" : "Waiting for the agent to open a page…")
+                ? error ?? (initialLoading ? "Connecting to Chrome…" : "Waiting for the agent to open a page…")
                 : "Browser will appear when Compositer starts navigating"}
             </p>
             {previewEnabled ? (
-              <Button disabled={loading} onClick={() => void refresh()} size="sm" type="button" variant="secondary">
+              <Button
+                disabled={initialLoading}
+                onClick={() => void refresh()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
                 Retry
               </Button>
             ) : null}
           </div>
         )}
-        {loading && preview ? (
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 animate-pulse bg-primary/60" />
-        ) : null}
-        {isLive && activityLabel && !isInteractive ? (
+        {isLive && activityLabel && !fullyInteractive ? (
           <div className="absolute inset-x-0 bottom-0 border-t border-white/10 bg-black/75 px-3 py-2 text-white text-xs">
             <p className="truncate font-medium">{activityLabel}</p>
           </div>
@@ -484,13 +622,15 @@ export function BrowserDrawer({
         <p className="mt-0.5 flex items-center gap-1">
           <ChevronRightIcon className="size-3 shrink-0" />
           <span>
-            {isInteractive
-              ? journeyComplete
-                ? "Free browsing — click, type, and scroll anytime"
-                : "Click fields to focus, type with keyboard, scroll with wheel"
-              : activityLabel && isLive
-                ? activityLabel
-                : "Headless Chrome · updates while the agent runs"}
+            {userTakeover
+              ? "Full control — agent paused until you return"
+              : fullyInteractive
+                ? journeyComplete
+                  ? "Free browsing — click, type, and scroll anytime"
+                  : "Click fields to focus, type with keyboard, scroll with wheel, paste with Ctrl+V"
+                : activityLabel && isLive
+                  ? activityLabel
+                  : "Headless Chrome · updates while the agent runs"}
           </span>
         </p>
       </div>

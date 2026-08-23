@@ -26,6 +26,9 @@ type PooledConnection = {
 let pooled: PooledConnection | undefined;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 let cdpLock: Promise<void> = Promise.resolve();
+let lastBringToFrontUrl: string | undefined;
+let lastBringToFrontAt = 0;
+const BRING_TO_FRONT_INTERVAL_MS = 2000;
 const viewportCache = new WeakMap<object, ViewportSize>();
 
 function isWebPageUrl(url: string): boolean {
@@ -213,7 +216,16 @@ export async function getPreviewPage(options?: {
     const enriched = await enrichCandidate(selected);
     const viewport = options?.viewport ?? DEFAULT_VIEWPORT;
     await ensureViewport(enriched.page, viewport);
-    await enriched.page.bringToFront();
+
+    const now = Date.now();
+    if (
+      enriched.url !== lastBringToFrontUrl ||
+      now - lastBringToFrontAt >= BRING_TO_FRONT_INTERVAL_MS
+    ) {
+      await enriched.page.bringToFront();
+      lastBringToFrontUrl = enriched.url;
+      lastBringToFrontAt = now;
+    }
 
     return { candidate: enriched, viewport };
   });

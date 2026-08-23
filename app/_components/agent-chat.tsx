@@ -29,23 +29,32 @@ import {
 } from "@/lib/gateway-retry";
 import {
   countUserMessages,
+  collectPendingInputRequests,
   deriveJourneyPhase,
   hasPendingInputRequests,
   hasUserMessage,
-  isBrowserUserControl,
+  isBrowserInteractive,
   isComposerLocked,
   isJourneyComplete,
   isJourneyInProgress,
 } from "@/lib/hitl-state";
+import type { RiskTier, SecurityCheckResult } from "@/lib/security/types";
+import { useSecurityMonitor } from "@/lib/security/use-security-monitor";
+import { findCheckoutPaymentRequest } from "@/lib/payment/checkout-hitl";
 import { AgentMessage } from "./agent-message";
 import { BrowserDrawer } from "./browser-drawer";
+import { HitlFormDialog } from "./hitl-form-dialog";
 import { HumanInputBanner } from "./human-input-banner";
+import { SecurityBlockModal } from "./security-block-modal";
+import { SecurityPanel } from "./security-panel";
+import { SecurityReviewDialog } from "./security-review-dialog";
+import { RazorpayCheckout } from "./razorpay-checkout";
 
 const AGENT_NAME = "compositer";
 
 export function AgentChat() {
   const [cancellationError, setCancellationError] = useState<string>();
-  const [browserDrawerOpen, setBrowserDrawerOpen] = useState(true);
+  const [browserDrawerOpen, setBrowserDrawerOpen] = useState(false);
   const [retryStatus, setRetryStatus] = useState<string | null>(null);
   const [failedTurnMessage, setFailedTurnMessage] = useState<string | null>(null);
   const staleSessionHandledRef = useRef(false);
@@ -55,6 +64,9 @@ export function AgentChat() {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [majorPromptGeneration, setMajorPromptGeneration] = useState(0);
   const [completedGeneration, setCompletedGeneration] = useState(0);
+  const [userTakeover, setUserTakeover] = useState(false);
+  const [securitySessionBlocked, setSecuritySessionBlocked] = useState(false);
+  const handledSecurityKeyRef = useRef<string | null>(null);
   const agent = useEveAgent();
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isEmpty = agent.data.messages.length === 0;
@@ -71,9 +83,104 @@ export function AgentChat() {
     [agent.events],
   );
   const previewEnabled = hasBrowserStarted || browserActivity.isActive;
+  const showBrowserPanel =
+    previewEnabled ||
+    (hasUserMessage(agent.data.messages) && (isBusy || retryStatus !== null));
   const isBrowserLive = previewEnabled && (isBusy || browserActivity.isActive || retryStatus !== null);
   const pendingHitl = hasPendingInputRequests(agent.data.messages);
+  const pendingInputRequests = collectPendingInputRequests(agent.data.messages);
   const userMessageCount = countUserMessages(agent.data.messages);
+  const handleSecurityBlockRef = useRef<() => Promise<void>>(async () => {});
+
+  const onSecurityComplete = useCallback(
+    (tier: RiskTier, score: number) => {
+      const url = browserActivity.focusUrl ?? "";
+      const key = `${url}:${tier}:${score}`;
+      if (!url || handledSecurityKeyRef.current === key) {
+        return;
+      }
+      handledSecurityKeyRef.current = key;
+
+      if (tier === "danger") {
+        void handleSecurityBlockRef.current();
+      } else if (tier === "review") {
+        if (agent.status === "submitted" || agent.status === "streaming") {
+          void agent.cancel().catch(() => undefined);
+        }
+      }
+    },
+    [agent, browserActivity.focusUrl],
+  );
+
+  const {
+    security,
+    resetSecurity,
+    acknowledgeReview,
+    setBlocked,
+    stopScan: stopSecurityScan,
+  } = useSecurityMonitor({
+    enabled: previewEnabled && !securitySessionBlocked,
+    focusUrl: browserActivity.focusUrl,
+    onComplete: onSecurityComplete,
+  });
+
+  const handleSecurityBlock = useCallback(async () => {
+    stopSecurityScan();
+    if (agent.status === "submitted" || agent.status === "streaming") {
+      try {
+        await agent.cancel();
+      } catch (error: unknown) {
+        setCancellationError(toErrorMessage(error));
+      }
+    }
+    await fetch("/api/browser/reset", { method: "POST" }).catch(() => undefined);
+    setUserTakeover(false);
+    setSecuritySessionBlocked(true);
+    setBlocked();
+  }, [agent, setBlocked, stopSecurityScan]);
+
+  useEffect(() => {
+    handleSecurityBlockRef.current = handleSecurityBlock;
+  }, [handleSecurityBlock]);
+
+  const failedSecurityChecks = useMemo((): SecurityCheckResult[] => {
+    const results: SecurityCheckResult[] = [];
+    for (const entry of security.checks.values()) {
+      if (entry !== "running" && entry.status === "fail") {
+        results.push(entry);
+      }
+    }
+    return results;
+  }, [security.checks]);
+
+  const warnSecurityChecks = useMemo((): SecurityCheckResult[] => {
+    const results: SecurityCheckResult[] = [];
+    for (const entry of security.checks.values()) {
+      if (entry !== "running" && (entry.status === "fail" || entry.status === "warn")) {
+        results.push(entry);
+      }
+    }
+    return results;
+  }, [security.checks]);
+
+  const checkoutPaymentRequest = useMemo(
+    () => findCheckoutPaymentRequest(pendingInputRequests),
+    [pendingInputRequests],
+  );
+
+  const showRazorpayCheckout =
+    !securitySessionBlocked &&
+    security.tier === "safe" &&
+    security.phase === "safe" &&
+    checkoutPaymentRequest !== undefined;
+
+  useEffect(() => {
+    if (showBrowserPanel) {
+      setBrowserDrawerOpen(true);
+    } else {
+      setBrowserDrawerOpen(false);
+    }
+  }, [showBrowserPanel]);
 
   useEffect(() => {
     if (userMessageCount === 0) {
@@ -114,9 +221,33 @@ export function AgentChat() {
   const journeyComplete = isJourneyComplete(journeyPhase);
   const journeyInProgress = isJourneyInProgress(journeyPhase);
   const composerLocked =
-    isComposerLocked({ isBusy, journeyPhase, pendingHitl }) || retryStatus !== null;
-  const isBrowserInteractive =
-    previewEnabled && isBrowserUserControl({ isBusy, journeyPhase, pendingHitl });
+    isComposerLocked({ isBusy, journeyPhase, pendingHitl }) ||
+    retryStatus !== null ||
+    securitySessionBlocked ||
+    security.phase === "review";
+  const isBrowserInteractiveMode =
+    previewEnabled &&
+    isBrowserInteractive({
+      isBusy,
+      journeyPhase,
+      pendingHitl,
+      userTakeover,
+    });
+
+  const handleTakeControl = useCallback(async () => {
+    if (isBusy) {
+      try {
+        await agent.cancel();
+      } catch (error: unknown) {
+        setCancellationError(toErrorMessage(error));
+      }
+    }
+    setUserTakeover(true);
+  }, [agent, isBusy]);
+
+  const handleReleaseControl = useCallback(() => {
+    setUserTakeover(false);
+  }, []);
   const eveBackendDown =
     agent.error?.message?.includes("ECONNREFUSED") ||
     agent.error?.message?.toLowerCase().includes("internal server error");
@@ -148,8 +279,11 @@ export function AgentChat() {
       return;
     }
 
+    handledSecurityKeyRef.current = null;
+    setSecuritySessionBlocked(false);
+    resetSecurity();
     void fetch("/api/browser/reset", { method: "POST" }).catch(() => undefined);
-  }, [agent.data.messages.length]);
+  }, [agent.data.messages.length, resetSecurity]);
 
   useEffect(() => {
     for (let index = agent.events.length - 1; index >= 0; index -= 1) {
@@ -272,6 +406,9 @@ export function AgentChat() {
     if ((text.length === 0 && message.files.length === 0) || composerLocked) return;
 
     setCancellationError(undefined);
+    setUserTakeover(false);
+    handledSecurityKeyRef.current = null;
+    setSecuritySessionBlocked(false);
     setBrowserDrawerOpen(true);
 
     const isFirstMajorPrompt = !hasUserMessage(agent.data.messages);
@@ -323,7 +460,7 @@ export function AgentChat() {
                 ? "Send a new task…"
                 : journeyInProgress
                   ? "Waiting for Compositer to ask you a question…"
-                  : "Describe your task (e.g. buy black shoes on Amazon under ₹5000)…"
+                  : "Start securely — we scan every site before you pay…"
           }
         />
         <PromptInputSubmit onStop={requestCancellation} status={agent.status} />
@@ -339,6 +476,7 @@ export function AgentChat() {
             <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
             <Button
               className="md:hidden"
+              disabled={!showBrowserPanel}
               onClick={() => setBrowserDrawerOpen((v) => !v)}
               size="sm"
               type="button"
@@ -352,6 +490,64 @@ export function AgentChat() {
           </header>
         )}
 
+        <SecurityPanel security={security} />
+
+        {showRazorpayCheckout && checkoutPaymentRequest ? (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 sm:px-6">
+            <RazorpayCheckout
+              checkoutRequest={checkoutPaymentRequest}
+              disabled={isBusy}
+              onPaymentSuccess={async (paymentId) => {
+                setCancellationError(undefined);
+                const payOption =
+                  checkoutPaymentRequest.options?.find(
+                    (option) =>
+                      option.id === "pay" || /razorpay|compositer/i.test(option.label),
+                  ) ?? checkoutPaymentRequest.options?.[0];
+
+                if (payOption) {
+                  await agent.respond([
+                    {
+                      requestId: checkoutPaymentRequest.requestId,
+                      optionId: payOption.id,
+                    },
+                  ]);
+                  return;
+                }
+
+                await agent.respond([
+                  {
+                    requestId: checkoutPaymentRequest.requestId,
+                    text: `Payment successful via Compositer Razorpay (ref: ${paymentId})`,
+                  },
+                ]);
+              }}
+            />
+          </div>
+        ) : null}
+
+        <SecurityReviewDialog
+          onContinue={() => acknowledgeReview()}
+          onStop={() => void handleSecurityBlock()}
+          open={security.phase === "review" && !securitySessionBlocked}
+          score={security.score}
+          url={security.url}
+          warnChecks={warnSecurityChecks}
+        />
+
+        <SecurityBlockModal
+          failedChecks={failedSecurityChecks}
+          onClose={() => {
+            agent.reset();
+            handledSecurityKeyRef.current = null;
+            setSecuritySessionBlocked(false);
+            resetSecurity();
+          }}
+          open={securitySessionBlocked}
+          score={security.score}
+          url={security.url}
+        />
+
         <HumanInputBanner
           canRespond={!isBusy}
           messages={agent.data.messages}
@@ -359,6 +555,16 @@ export function AgentChat() {
             setCancellationError(undefined);
             return agent.respond(inputResponses);
           }}
+        />
+
+        <HitlFormDialog
+          canRespond={!isBusy}
+          focusUrl={browserActivity.focusUrl}
+          onRespond={(inputResponses) => {
+            setCancellationError(undefined);
+            return agent.respond(inputResponses);
+          }}
+          pendingRequests={pendingInputRequests}
         />
 
         {retryStatus ? (
@@ -435,10 +641,9 @@ export function AgentChat() {
         >
           {isEmpty ? (
             <div className="flex flex-col items-center gap-3 text-center">
-              <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
-              <p className="max-w-md text-muted-foreground text-sm">
-                Chat on the left, live browser on the right. Compositer will ask you for OTPs,
-                captchas, and form help instead of getting stuck.
+              <h1 className="font-medium text-5xl tracking-tighter">Compositer</h1>
+              <p className="max-w-md text-muted-foreground text-sm text-pretty">
+                Local Docker sandbox · headless Chrome · 10-point site scanner on every navigation.
               </p>
             </div>
           ) : null}
@@ -446,17 +651,23 @@ export function AgentChat() {
         </div>
       </main>
 
-      <BrowserDrawer
-        activityLabel={browserActivity.label}
-        className={cn(!browserDrawerOpen && "md:hidden")}
-        focusUrl={browserActivity.focusUrl}
-        isInteractive={isBrowserInteractive}
-        isLive={isBrowserLive}
-        journeyComplete={journeyComplete}
-        onOpenChange={setBrowserDrawerOpen}
-        open={browserDrawerOpen}
-        previewEnabled={previewEnabled}
-      />
+      {showBrowserPanel ? (
+        <BrowserDrawer
+          activityLabel={browserActivity.label}
+          canTakeControl={previewEnabled && !userTakeover && (isBusy || journeyInProgress)}
+          className={cn(!browserDrawerOpen && "md:hidden")}
+          focusUrl={browserActivity.focusUrl}
+          isInteractive={isBrowserInteractiveMode}
+          isLive={isBrowserLive}
+          journeyComplete={journeyComplete}
+          onOpenChange={setBrowserDrawerOpen}
+          onReleaseControl={handleReleaseControl}
+          onTakeControl={() => void handleTakeControl()}
+          open={browserDrawerOpen}
+          previewEnabled={previewEnabled}
+          userTakeover={userTakeover}
+        />
+      ) : null}
     </div>
   );
 }

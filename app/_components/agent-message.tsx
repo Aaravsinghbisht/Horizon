@@ -37,6 +37,7 @@ import {
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isFormLikeHitl } from "@/lib/hitl-ui";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -167,6 +168,14 @@ function QuestionRequest({
   );
   const hasOptions = (inputRequest.options?.length ?? 0) > 0;
   const acceptsFreeform = inputRequest.allowFreeform === true || !hasOptions;
+
+  if (isFormLikeHitl(inputRequest) && inputResponse === undefined) {
+    return (
+      <p className="rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-muted-foreground text-sm">
+        Answer in the dialog — Compositer is waiting for your form, OTP, or verification input.
+      </p>
+    );
+  }
 
   const submitResponse = ({ selectedValues, text }: QuestionResponse) =>
     onInputResponses([

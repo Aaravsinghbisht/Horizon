@@ -4,6 +4,7 @@ import type { EveMessageInputRequest } from "eve/react";
 import { HandHelpingIcon } from "lucide-react";
 import type { EveMessage } from "eve/react";
 import { collectPendingInputRequests } from "@/lib/hitl-state";
+import { getInlinePendingRequests } from "@/lib/hitl-ui";
 
 export function HumanInputBanner({
   canRespond,
@@ -18,7 +19,7 @@ export function HumanInputBanner({
     text?: string;
   }[]) => void | Promise<void>;
 }) {
-  const pending = collectPendingInputRequests(messages);
+  const pending = getInlinePendingRequests(collectPendingInputRequests(messages));
 
   if (pending.length === 0) {
     return null;
