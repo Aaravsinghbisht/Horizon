@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
+  BrainIcon,
   Check,
   CreditCard,
   Eye,
@@ -183,69 +184,163 @@ const STATS = [
 
 function HeroMockup() {
   return (
-    <div className="card-glow relative rounded-xl bg-zinc-950/80 shadow-[0_40px_120px_-20px_rgba(255,255,255,0.15)]">
-      <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+    <div className="card-glow relative overflow-hidden rounded-xl bg-zinc-950/90 shadow-[0_40px_120px_-20px_rgba(255,255,255,0.15)]">
+      {/* App chrome */}
+      <div className="flex items-center gap-3 border-b border-white/10 bg-zinc-900/80 px-4 py-2.5">
         <div className="flex gap-1.5">
-          <span className="size-2.5 rounded-full bg-zinc-700" />
-          <span className="size-2.5 rounded-full bg-zinc-700" />
-          <span className="size-2.5 rounded-full bg-zinc-700" />
+          <span className="size-2.5 rounded-full bg-zinc-600" />
+          <span className="size-2.5 rounded-full bg-zinc-600" />
+          <span className="size-2.5 rounded-full bg-zinc-600" />
         </div>
-        <div className="flex h-7 flex-1 items-center justify-center gap-2 rounded-md border border-white/10 bg-black px-3 font-mono text-xs text-zinc-400">
-          <Lock className="size-3 text-emerald-400" />
-          en.wikipedia.org/wiki/Headless_browser
-          <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-            <ShieldCheck className="size-3" /> Score 8 · SAFE
+        <div className="flex items-center gap-2">
+          <CompositerIcon className="size-3.5" />
+          <span className="font-medium text-white text-xs">Compositer</span>
+        </div>
+        <div className="hidden h-5 w-px bg-white/10 sm:block" />
+        <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline">
+          eve · docker/eve-sandbox · BU_CDP_URL
+        </span>
+        <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-medium text-emerald-400">
+          <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+          agent running
+        </span>
+      </div>
+
+      {/* Browser URL bar */}
+      <div className="flex items-center gap-2 border-b border-white/10 bg-black px-4 py-2">
+        <Globe className="size-3.5 shrink-0 text-zinc-500" />
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-white/10 bg-zinc-900/60 px-3 py-1.5 font-mono text-[11px] text-zinc-400">
+          <Lock className="size-3 shrink-0 text-emerald-400" />
+          <span className="truncate">en.wikipedia.org/wiki/Headless_browser</span>
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+            <ShieldCheck className="size-3" /> 8 · SAFE
           </span>
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 sm:grid-cols-[1fr_240px]">
-        <div className="space-y-3">
-          <div className="h-28 rounded-lg border border-white/10 bg-gradient-to-br from-white/[0.07] to-transparent" />
-          <div className="grid grid-cols-3 gap-3">
-            <div className="h-20 rounded-lg border border-white/10 bg-white/[0.04]" />
-            <div className="h-20 rounded-lg border border-white/10 bg-white/[0.04]" />
-            <div className="h-20 rounded-lg border border-white/10 bg-white/[0.04]" />
+      <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_200px]">
+        {/* Chat + browser split — mirrors real UI */}
+        <div className="grid min-w-0 border-white/10 sm:grid-cols-[minmax(0,38%)_minmax(0,1fr)] sm:border-r">
+          {/* Chat column */}
+          <div className="space-y-3 border-b border-white/10 p-3 sm:border-b-0 sm:border-r">
+            <p className="font-mono text-[10px] tracking-widest text-zinc-500 uppercase">Chat</p>
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+              <p className="font-mono text-[10px] text-zinc-500">you</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">
+                Summarize headless browser security tradeoffs from Wikipedia — no cloud browsers.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+              <p className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500">
+                <BrainIcon className="size-3" /> eve
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                Loaded <span className="text-zinc-300">browser-use</span> ·{" "}
+                <span className="text-emerald-400/90">page_info()</span> → HTTPS tab active
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className="rounded border border-white/10 bg-black/40 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">
+                  activate_tab(0)
+                </span>
+                <span className="rounded border border-white/10 bg-black/40 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">
+                  js(tree)
+                </span>
+              </div>
+            </div>
+            <div className="rounded-md border border-dashed border-white/15 px-2 py-1.5 text-center font-mono text-[10px] text-zinc-600">
+              composer locked · HITL only
+            </div>
           </div>
-          <div className="h-3 w-3/4 rounded-full bg-white/[0.06]" />
-          <div className="h-3 w-1/2 rounded-full bg-white/[0.06]" />
+
+          {/* Live browser preview */}
+          <div className="min-w-0 bg-[#0a0a0a] p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="font-medium text-white text-[11px]">Live browser</p>
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-400">
+                Live
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-white/10 bg-white">
+              {/* Mini Wikipedia article */}
+              <div className="border-b border-zinc-200 bg-[#f8f9fa] px-2.5 py-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="size-4 rounded bg-white border border-zinc-300 flex items-center justify-center text-[8px] font-bold text-zinc-600">
+                    W
+                  </div>
+                  <span className="font-medium text-[10px] text-zinc-800">Headless browser</span>
+                </div>
+              </div>
+              <div className="space-y-2 p-2.5 text-[9px] leading-relaxed text-zinc-700">
+                <p className="font-semibold text-[11px] text-zinc-900">Headless browser</p>
+                <p>
+                  A <span className="bg-yellow-100">headless browser</span> is a web browser without
+                  a graphical user interface — controlled via{" "}
+                  <span className="text-blue-700">Chrome DevTools Protocol</span> or WebDriver.
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="rounded border border-zinc-200 bg-zinc-50 p-1.5">
+                    <p className="font-mono text-[8px] text-zinc-500">CDP port</p>
+                    <p className="font-semibold text-zinc-800">9222</p>
+                  </div>
+                  <div className="rounded border border-zinc-200 bg-zinc-50 p-1.5">
+                    <p className="font-mono text-[8px] text-zinc-500">sandbox</p>
+                    <p className="font-semibold text-zinc-800">isolated</p>
+                  </div>
+                </div>
+                <p className="text-zinc-500">
+                  Used for automation, testing, and agent-driven navigation…
+                </p>
+              </div>
+            </div>
+            <p className="mt-2 truncate font-mono text-[9px] text-zinc-500">
+              compositer-chrome:9222 · JPEG ~500ms
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-2 font-mono text-[11px]">
+        {/* Site checks rail */}
+        <div className="space-y-1.5 p-3 font-mono text-[10px]">
           <p className="pb-1 text-[10px] tracking-widest text-zinc-500 uppercase">Site checks</p>
           {[
-            ["https_transport", "pass"],
-            ["typosquatting", "pass"],
-            ["homograph_domain", "pass"],
-            ["credential_form_risk", "warn"],
-            ["phishing_url_path", "pass"],
-          ].map(([id, status]) => (
+            ["https_transport", "pass", "TLS on wire"],
+            ["typosquatting", "pass", "no brand drift"],
+            ["homograph_domain", "pass", "ASCII host"],
+            ["credential_form_risk", "warn", "login form"],
+            ["phishing_url_path", "pass", "clean path"],
+          ].map(([id, status, note]) => (
             <div
               key={id}
-              className="flex items-center justify-between rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-2"
+              className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5"
             >
-              <span className="truncate text-zinc-300">{id}</span>
-              {status === "pass" ? (
-                <span className="ml-2 flex items-center gap-1 text-emerald-400">
-                  <Check className="size-3" /> SAFE
-                </span>
-              ) : (
-                <span className="ml-2 flex items-center gap-1 text-amber-400">
-                  <TriangleAlert className="size-3" /> warn
-                </span>
-              )}
+              <div className="flex items-center justify-between gap-1">
+                <span className="truncate text-zinc-300">{id}</span>
+                {status === "pass" ? (
+                  <span className="flex shrink-0 items-center gap-0.5 text-emerald-400">
+                    <Check className="size-2.5" /> SAFE
+                  </span>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-0.5 text-amber-400">
+                    <TriangleAlert className="size-2.5" /> warn
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-[9px] text-zinc-600">{note}</p>
             </div>
           ))}
+          <div className="mt-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5">
+            <p className="text-[9px] text-zinc-500">aggregate score</p>
+            <p className="font-semibold text-emerald-400">8 / 100 · SAFE tier</p>
+          </div>
         </div>
       </div>
 
-      <div className="mx-4 mb-4 flex flex-col gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:flex-row sm:items-center">
+      <div className="mx-3 mb-3 flex flex-col gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:mx-4 sm:mb-4 sm:flex-row sm:items-center">
         <p className="text-xs text-amber-300">
           <span className="font-semibold">HITL checkpoint:</span> TLS + homograph checks passed — proceed?
         </p>
         <div className="flex shrink-0 gap-2 sm:ml-auto">
           <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-300">
-            Continue · score 12 SAFE
+            Continue · score 8 SAFE
           </span>
           <span className="rounded-md border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-zinc-200">
             Take control
